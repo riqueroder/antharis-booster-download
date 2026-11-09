@@ -37,7 +37,8 @@ function ago(t) {
 const online = m => !m.released && Date.now() - new Date(m.last_seen) < ONLINE_MS;
 const ini = n => (String(n || '?').replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2) || '?').toUpperCase();
 const avatar = u => u && u.avatar ? `<img class="av" src="${esc(u.avatar)}" alt="" referrerpolicy="no-referrer">` : `<span class="av">${esc(ini(u && u.name))}</span>`;
-const provPill = p => p === 'discord' ? '<span class="pill p-dc">Discord</span>' : p === 'google' ? '<span class="pill p-gg">Google</span>' : `<span class="pill p-off">${esc(p || 'E-mail')}</span>`;
+const provName = p => p === 'google' ? 'Google' : p === 'anonymous' ? 'Temporária' : 'Discord';
+const provPill = p => p === 'anonymous' ? '<span class="pill p-off">Temporária</span>' : p === 'discord' ? '<span class="pill p-dc">Discord</span>' : p === 'google' ? '<span class="pill p-gg">Google</span>' : `<span class="pill p-off">${esc(p || 'E-mail')}</span>`;
 function toast(msg, err) { const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; $('#toasts').appendChild(t); setTimeout(() => t.remove(), 3800); }
 async function copy(txt, what) { try { await navigator.clipboard.writeText(txt); toast((what || 'Copiado') + ' para a área de transferência.'); } catch { toast('Não consegui copiar.', true); } }
 
@@ -164,8 +165,8 @@ function pgUsers() {
     .map(u => ({ u, keys: D.keys.filter(k => k.owner === u.id) }))
     .filter(({ u, keys }) => !q || [u.name, u.email, ...keys.map(k => k.key)].join(' ').toLowerCase().includes(q));
   const c = p => D.users.filter(u => p === 'all' || u.provider === p).length;
-  return head('Usuários', 'Contas Discord/Google que entraram no app, com a key vinculada.', `<input class="in search" id="uq" placeholder="Buscar por nome, e-mail ou key" value="${esc(UI.userQ)}">`) + `
-    <div class="chips">${[['all', 'Todos'], ['discord', 'Discord'], ['google', 'Google']].map(([p, t]) => `<button class="chip ${UI.userProv === p ? 'on' : ''}" data-up="${p}">${t} · ${c(p)}</button>`).join('')}</div>
+  return head('Usuários', 'Contas Discord, Google e temporárias (só de um PC) que entraram no app, com a key vinculada.', `<input class="in search" id="uq" placeholder="Buscar por nome, e-mail ou key" value="${esc(UI.userQ)}">`) + `
+    <div class="chips">${[['all', 'Todos'], ['discord', 'Discord'], ['google', 'Google'], ['anonymous', 'Temporárias']].map(([p, t]) => `<button class="chip ${UI.userProv === p ? 'on' : ''}" data-up="${p}">${t} · ${c(p)}</button>`).join('')}</div>
     <div class="tbl-wrap"><table><thead><tr><th>Usuário</th><th>Conta</th><th>Key</th><th>Vence</th><th>PCs</th><th>Visto</th><th>Status</th></tr></thead><tbody>
     ${rows.map(({ u, keys }) => { const k = keys[0]; const ms = k ? D.machines.filter(m => m.key_id === k.id) : [];
       return `<tr class="${k ? 'click' : ''}" ${k ? `data-key="${k.id}"` : ''}><td><div class="who">${avatar(u)}<div><b>${esc(u.name)}</b><small>${esc(u.email || '')}</small></div></div></td>
@@ -238,7 +239,7 @@ function keyModal(id) {
       <div class="kv"><span>Tipo</span><span>${kindTxt(k)}${k.tester ? ' · Tester' : ''}</span></div>
       <div class="kv"><span>Ativada em</span><span>${fmtDT(k.activated_at)}</span></div>
       <div class="kv"><span>Vence</span><span>${expTxt(k)}</span></div>
-      <div class="kv"><span>Conta vinculada</span><span>${u ? `${esc(u.name)} (${u.provider === 'google' ? 'Google' : 'Discord'})` : '—'}</span></div>
+      <div class="kv"><span>Conta vinculada</span><span>${u ? `${esc(u.name)} (${provName(u.provider)})` : '—'}</span></div>
       <div class="kv"><span>Nota</span><span>${esc(k.note || '—')}</span></div>
       <div class="kv"><span>PCs</span><span>${ms.filter(m => !m.released).length} de ${k.max_pcs}</span></div>
       ${ms.map(m => `<div class="kv"><span><a href="#pc/${m.id}" data-close>${esc(m.pc_name || 'PC')}</a>${m.released ? ' <span class="pill p-off">liberado</span>' : ''}</span><span>${ago(m.last_seen)} · v${esc(m.app_version || '?')}</span></div>`).join('')}
