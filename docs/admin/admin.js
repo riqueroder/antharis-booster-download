@@ -99,11 +99,48 @@ function showNotAdmin(user) {
 // ---------- estrutura ----------
 const PAGES = [['overview', 'Visão geral'], ['users', 'Usuários'], ['keys', 'Keys'], ['pcs', 'PCs ativos'], ['metrics', 'Métricas'], ['versions', 'Versões'], ['audit', 'Auditoria']];
 function route() { const h = location.hash.replace('#', '') || 'overview'; const [p, id] = h.split('/'); return { p, id }; }
+// ---------- avisos: alguém tentou usar uma key em outro PC ----------
+const BELL = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+const seenAt = () => { try { return +localStorage.getItem('ab.seenLimit') || 0; } catch { return 0; } };
+const setSeen = () => { try { localStorage.setItem('ab.seenLimit', String(Date.now())); } catch {} };
+const limitEvents = () => D.events.filter(e => e.kind === 'limit');
+const unreadLimits = () => limitEvents().filter(e => new Date(e.created_at).getTime() > seenAt());
+let lastLimitId = null;
+function checkNewLimits() {
+  const l = limitEvents(); if (!l.length) { lastLimitId = 0; return; }
+  const top = l[0].id;
+  if (lastLimitId !== null && top > lastLimitId) {
+    const novos = l.filter(e => e.id > lastLimitId);
+    for (const e of novos.slice(0, 3)) {
+      const k = keyOf(e.key_id); const txt = `Tentaram usar a key ${k ? k.key : ''} em outro PC (${(e.detail || '').split(' · ')[0] || 'PC desconhecido'})`;
+      toast('⚠ ' + txt, true);
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Antharis Admin', { body: txt }); } catch {}
+    }
+  }
+  lastLimitId = top;
+}
+function openBell() {
+  if ('Notification' in window && Notification.permission === 'default') { try { Notification.requestPermission(); } catch {} }
+  const seen = seenAt(); const list = limitEvents().slice(0, 40);
+  $('#modal').innerHTML = `<div class="bg"><div class="box" role="dialog" aria-modal="true" aria-label="Tentativas em outro PC">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>Tentativas em outro PC</h2><button class="btn sm" id="bClose">Fechar</button></div>
+    <p class="note" style="margin:0">Quando alguém tenta ativar uma key que já está no limite de PCs, aparece aqui. O app da pessoa recusa a ativação.</p>
+    ${list.length ? list.map(e => { const k = keyOf(e.key_id); const u = k && k.owner && userOf(k.owner); const isNew = new Date(e.created_at).getTime() > seen; const parts = (e.detail || '').split(' · ');
+      return `<div class="alert ${isNew ? 'new' : ''}" ${k ? `data-key="${k.id}"` : ''}><div class="al-ic">${BELL}</div><div style="min-width:0;flex:1"><b class="mono">${esc(k ? k.key : 'key apagada')}</b>${isNew ? ' <span class="pill p-warn">nova</span>' : ''}
+        <div class="al-d">${esc(parts[0] || 'PC desconhecido')}${parts[2] ? ' · ' + esc(parts[2]) : ''}${parts[1] ? ' · ' + esc(parts[1]) : ''}</div>
+        <small>Dono da key: ${u ? esc(u.name) + ' (' + provName(u.provider) + ')' : esc(k && k.note || '—')} · ${ago(e.created_at)} · ${fmtDT(e.created_at)}</small></div></div>`; }).join('') : '<div class="empty">Nenhuma tentativa ainda.</div>'}
+  </div></div>`;
+  setSeen();
+  const close = () => { $('#modal').innerHTML = ''; render(); };
+  $('#bClose').onclick = close;
+  $('#modal .bg').onclick = e => { if (e.target.classList.contains('bg')) close(); };
+  $$('#modal .alert[data-key]').forEach(a => a.onclick = () => keyModal(a.dataset.key));
+}
 function shell(active, inner) {
   const meName = D.me && D.me.user_metadata && (D.me.user_metadata.full_name || D.me.user_metadata.name) || (D.me && D.me.email) || 'admin';
   return `<div class="shell"><nav class="side">
     <div class="brand"><i><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#02121a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></i><div><b>ANTHARIS</b><small>BOOSTER</small></div></div>
-    <div class="sub">Painel admin</div>
+    <div class="sub">Painel admin <button class="bell ${unreadLimits().length ? 'has' : ''}" id="bell" aria-label="Avisos de tentativas em outro PC" title="Tentativas de usar a key em outro PC">${BELL}${unreadLimits().length ? `<em>${unreadLimits().length}</em>` : ''}</button></div>
     ${PAGES.map(([id, t]) => `<a class="nav ${active === id ? 'on' : ''}" href="#${id}">${ic(id)}${t}</a>`).join('')}
     <div class="me"><span>Logado como ${esc(meName)}</span><button id="refresh">Atualizar dados</button><button id="logout">Sair do admin</button></div>
   </nav><main class="main">${inner}</main></div>`;
@@ -114,8 +151,9 @@ function render() {
   const act = p === 'pc' ? 'pcs' : p;
   $('#app').innerHTML = shell(act, fn());
   $('#logout').onclick = async () => { await sb.auth.signOut(); location.hash = ''; showLogin(); };
-  $('#refresh').onclick = async () => { await loadAll(); render(); toast('Dados atualizados.'); };
-  const after = { keys: bindKeys, users: bindUsers, pcs: bindPcs, pc: () => bindPc(id), versions: bindVersions, metrics: bindMetrics }[p];
+  $('#refresh').onclick = async () => { await loadAll(); checkNewLimits(); render(); toast('Dados atualizados.'); };
+  $('#bell').onclick = openBell;
+  const after = { overview: () => { const x = $('#stLimit'); if (x) x.onclick = openBell; }, keys: bindKeys, users: bindUsers, pcs: bindPcs, pc: () => bindPc(id), versions: bindVersions, metrics: bindMetrics }[p];
   if (after) after();
 }
 window.addEventListener('hashchange', () => { if (D.me) { render(); window.scrollTo(0, 0); } });
@@ -134,10 +172,11 @@ function pgOverview() {
   const max = Math.max(1, ...Object.values(cnt));
   const bars = days.map((d, i) => { const h = Math.round(cnt[d] / max * 150); return `<rect x="${i * 20 + 3}" y="${170 - h}" width="14" height="${Math.max(h, 2)}" rx="3" fill="${cnt[d] ? 'url(#g)' : '#172133'}"><title>${fmtDate(d + 'T12:00')}: ${cnt[d]}</title></rect>`; }).join('');
   return head('Visão geral', 'Resumo do Antharis Booster.') + `
-    <div class="grid4">
+    <div class="grid4 g5">
       <div class="stat"><small>Usuários</small><b>${D.users.length}</b><span>+${newUsers} nos últimos 30 dias</span></div>
       <div class="stat"><small>Keys ativas</small><b>${st.filter(s => s === 'active' || s === 'soon').length}</b><span>${st.filter(s => s === 'unused').length} ainda não usadas</span></div>
       <div class="stat"><small>PCs online agora</small><b style="color:var(--cyan)">${on}</b><span>de ${act} PCs ativados</span></div>
+      <div class="stat" role="button" tabindex="0" id="stLimit" style="cursor:pointer"><small>Tentativas em outro PC</small><b style="color:${unreadLimits().length ? 'var(--bad)' : 'var(--text)'}">${limitEvents().filter(e => Date.now() - new Date(e.created_at) < 7 * DAY).length}</b><span>${unreadLimits().length ? unreadLimits().length + ' nova(s) · clique para ver' : 'últimos 7 dias'}</span></div>
       <div class="stat"><small>Vencem em 7 dias</small><b style="color:var(--warn)">${st.filter(s => s === 'soon').length}</b><span>${st.filter(s => s === 'blocked').length} bloqueadas</span></div>
     </div>
     <div class="row">
@@ -146,14 +185,15 @@ function pgOverview() {
       <section class="card" style="flex:2 1 300px;min-width:0"><h2>Atividade recente</h2>${feed(D.events.slice(0, 8)) || '<div class="empty">Nada ainda.</div>'}</section>
     </div>`;
 }
-const EV = { activate: 'ativou a key', limit: 'tentou ativar além do limite de PCs', link: 'vinculou a conta', swap: 'trocou de PC (automático)',
+const EV = { activate: 'ativou a key', limit: 'tentou usar a key em outro PC', link: 'vinculou a conta', swap: 'trocou de PC (automático)',
   'admin:create': 'gerou keys', 'admin:block': 'bloqueou a key', 'admin:unblock': 'desbloqueou a key', 'admin:renew': 'renovou a key', 'admin:release': 'liberou troca de PC',
   'admin:delete': 'apagou uma key', 'admin:edit': 'editou a key', 'admin:pcdel': 'removeu um PC' };
 function feed(list) {
   return list.map(e => {
     const k = keyOf(e.key_id); const u = k && k.owner && userOf(k.owner);
     const admin = e.kind.startsWith('admin:');
-    const who = admin ? 'Admin' : (u ? u.name : (k ? k.key.slice(0, 9) + '…' : 'Key'));
+    const who = admin ? 'Admin' : e.kind === 'limit' ? 'Alguém' : (u ? u.name : (k ? k.key.slice(0, 9) + '…' : 'Key'));
+    if (e.kind === 'limit') return `<div class="feed"><span class="av" style="background:rgba(255,122,147,.14);color:var(--bad)">!</span><div style="min-width:0"><div>Alguém tentou usar a key <span class="mono">${esc(k ? k.key.slice(0, 9) + '…' : '')}</span> em outro PC <span class="muted">· ${esc((e.detail || '').split(' · ')[0])}</span></div><small>${ago(e.created_at)}</small></div></div>`;
     return `<div class="feed">${admin ? '<span class="av" style="background:#12324a;color:var(--cyan)">AD</span>' : avatar(u || { name: who })}<div style="min-width:0"><div>${esc(who)} ${EV[e.kind] || esc(e.kind)}${e.detail ? ` <span class="muted">· ${esc(e.detail)}</span>` : ''}</div><small>${ago(e.created_at)}</small></div></div>`;
   }).join('');
 }
@@ -454,8 +494,9 @@ async function boot() {
     const { data: isAdm, error } = await sb.rpc('is_admin');
     if (error) throw error;
     if (!isAdm) return showNotAdmin(session.user);
-    await loadAll(); render();
-    setInterval(async () => { if (document.visibilityState === 'visible' && !$('#modal').innerHTML) { try { await loadAll(); const a = document.activeElement; if (!a || a.tagName !== 'INPUT') render(); } catch {} } }, 60000);
+    await loadAll(); checkNewLimits(); render();
+    // confere a cada 30 s: avisa na hora quando alguém tenta usar uma key em outro PC
+    setInterval(async () => { try { await loadAll(); checkNewLimits(); if (document.visibilityState === 'visible' && !$('#modal').innerHTML) { const a = document.activeElement; if (!a || a.tagName !== 'INPUT') render(); } } catch {} }, 30000);
   } catch (e) {
     $('#app').innerHTML = `<div class="login"><div class="card"><h1>Não consegui carregar</h1><p class="muted">${esc(e.message || e)}</p><button class="btn" onclick="location.reload()">Tentar de novo</button></div></div>`;
   }

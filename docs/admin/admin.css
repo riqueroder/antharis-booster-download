@@ -119,3 +119,17 @@ pre.sql { background: var(--card2); border: 1px solid var(--line); border-radius
 .daysin label, .daysin span { font-size: 12.5px; color: var(--muted); white-space: nowrap; font-weight: 500; }
 .daysin .in { width: 110px; height: 36px; }
 #modal .daysin { margin-top: 0; }
+
+.grid4.g5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1250px) { .grid4.g5 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .grid4.g5 { grid-template-columns: minmax(0, 1fr); } }
+.side .sub { display: flex; align-items: center; justify-content: space-between; }
+.bell { position: relative; width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--line2); background: var(--card); color: var(--soft); display: grid; place-items: center; }
+.bell:hover { color: var(--text); border-color: #2a3c58; }
+.bell.has { color: var(--warn); border-color: rgba(245,184,61,.5); animation: bellPulse 2s ease-in-out infinite; }
+.bell em { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-style: normal; font-weight: 800; display: grid; place-items: center; }
+@keyframes bellPulse { 50% { box-shadow: 0 0 0 4px rgba(245,184,61,.15); } }
+.alert { display: flex; gap: 12px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card2); cursor: pointer; }
+.alert:hover { border-color: #2a3c58; } .alert.new { border-color: rgba(245,184,61,.45); background: rgba(245,184,61,.05); }
+.alert .al-ic { width: 34px; height: 34px; border-radius: 10px; background: rgba(255,122,147,.12); color: var(--bad); display: grid; place-items: center; flex: none; }
+.alert .al-d { font-size: 13px; color: var(--soft); margin-top: 3px; } .alert small { display: block; font-size: 11.5px; color: var(--muted); margin-top: 3px; }
