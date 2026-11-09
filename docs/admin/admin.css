@@ -114,3 +114,8 @@ pre.sql { background: var(--card2); border: 1px solid var(--line); border-radius
 #toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
 .toast { background: #0f1d2e; border: 1px solid #23405f; color: var(--text); padding: 12px 16px; border-radius: 12px; font-size: 13.5px; box-shadow: 0 10px 30px rgba(0,0,0,.4); animation: up .25s ease; }
 .toast.err { border-color: #6b2636; background: #2c1219; }
+
+.daysin { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.daysin label, .daysin span { font-size: 12.5px; color: var(--muted); white-space: nowrap; font-weight: 500; }
+.daysin .in { width: 110px; height: 36px; }
+#modal .daysin { margin-top: 0; }

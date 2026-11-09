@@ -40,7 +40,7 @@
 
 A key continua ativada nas próximas atualizações. Para sair, vá em **Configurações → Preferências → Sair**.
 
-> Sem internet, o app continua funcionando por até 3 dias desde a última verificação.
+> A licença é conferida a cada 2 minutos. Quando a key vence, o acesso fecha na hora. Sem internet, o app continua funcionando por até 1 hora.
 
 ## Atualizações
 

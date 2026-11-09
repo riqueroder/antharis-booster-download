@@ -197,8 +197,8 @@ function pgKeys() {
       <section class="card" style="flex:1 1 300px;max-width:360px;border-color:var(--cyan);display:flex;flex-direction:column;gap:14px">
         <h2 style="margin:0">Nova key</h2>
         <div class="field"><label for="cNote">Cliente / nota (opcional)</label><input class="in" id="cNote" placeholder="Nome ou Discord" value="${esc(c.note)}"></div>
-        <div class="field"><span>Duração</span><div class="chips">${[[7, '7 dias'], [30, '30 dias'], [90, '90 dias'], ['life', 'Vitalícia']].map(([v, t]) => `<button class="chip ${(v === 'life' ? c.kind === 'lifetime' : c.kind === 'days' && c.days === v) ? 'on' : ''}" data-cd="${v}">${t}</button>`).join('')}</div>
-          ${c.kind === 'days' ? `<input class="in" id="cDays" type="number" min="1" max="3650" value="${c.days}" aria-label="Dias">` : ''}</div>
+        <div class="field"><span>Duração</span><div class="chips">${[[1, '1 dia'], [7, '7 dias'], [15, '15 dias'], [30, '30 dias'], [60, '60 dias'], [90, '90 dias'], [180, '180 dias'], [365, '1 ano'], ['life', 'Vitalícia']].map(([v, t]) => `<button class="chip ${(v === 'life' ? c.kind === 'lifetime' : c.kind === 'days' && c.days === v) ? 'on' : ''}" data-cd="${v}">${t}</button>`).join('')}</div>
+          ${c.kind === 'days' ? `<div class="daysin"><label for="cDays">Ou digite quantos dias:</label><input class="in" id="cDays" type="number" min="1" max="3650" value="${c.days}"><span>dias</span></div>` : ''}</div>
         <div class="grid2" style="gap:10px"><div class="field"><label for="cPcs">Limite de PCs</label><input class="in" id="cPcs" type="number" min="1" max="20" value="${c.pcs}"></div>
           <div class="field"><label for="cQty">Quantidade</label><input class="in" id="cQty" type="number" min="1" max="100" value="${c.qty}"></div></div>
         <div class="tgrow"><div><b>Key de tester</b><span>Para você testar as versões</span></div><button class="tg ${c.tester ? 'on' : ''}" id="cTester" aria-label="Key de tester"></button></div>
@@ -212,8 +212,9 @@ function bindKeys() {
   $$('[data-kf]').forEach(b => b.onclick = () => { UI.keyFilter = b.dataset.kf; render(); });
   $$('tr[data-key]').forEach(r => r.onclick = () => keyModal(r.dataset.key));
   const c = UI.create;
-  const sync = () => { c.note = $('#cNote').value; if ($('#cDays')) c.days = +$('#cDays').value || 30; c.pcs = +$('#cPcs').value || 1; c.qty = +$('#cQty').value || 1; };
+  const sync = () => { c.note = $('#cNote').value; if ($('#cDays')) c.days = Math.min(3650, Math.max(1, Math.round(+$('#cDays').value || 30))); c.pcs = +$('#cPcs').value || 1; c.qty = +$('#cQty').value || 1; };
   $$('[data-cd]').forEach(b => b.onclick = () => { sync(); const v = b.dataset.cd; if (v === 'life') c.kind = 'lifetime'; else { c.kind = 'days'; c.days = +v; } render(); });
+  if ($('#cDays')) $('#cDays').oninput = () => { sync(); $$('[data-cd]').forEach(b => b.classList.toggle('on', +b.dataset.cd === c.days)); };
   $('#cTester').onclick = () => { sync(); c.tester = !c.tester; render(); };
   $('#cGo').onclick = async () => {
     sync(); $('#cGo').disabled = true;
@@ -245,7 +246,8 @@ function keyModal(id) {
       ${ms.map(m => `<div class="kv"><span><a href="#pc/${m.id}" data-close>${esc(m.pc_name || 'PC')}</a>${m.released ? ' <span class="pill p-off">liberado</span>' : ''}</span><span>${ago(m.last_seen)} · v${esc(m.app_version || '?')}</span></div>`).join('')}
     </div>
     <div class="field"><span>Renovar</span><div class="chips">
-      <button class="btn sm cy" data-renew="7">+7 dias</button><button class="btn sm cy" data-renew="30">+30 dias</button><button class="btn sm cy" data-renew="90">+90 dias</button>
+      <button class="btn sm cy" data-renew="7">+7 dias</button><button class="btn sm cy" data-renew="30">+30 dias</button><button class="btn sm cy" data-renew="90">+90 dias</button><button class="btn sm cy" data-renew="365">+1 ano</button>
+      <span class="daysin"><input class="in" id="mDays" type="number" min="1" max="3650" placeholder="dias" aria-label="Quantos dias adicionar"><button class="btn sm cy" id="mDaysGo">Adicionar</button></span>
       ${k.kind !== 'lifetime' ? '<button class="btn sm" data-renew="life">Tornar vitalícia</button>' : ''}</div></div>
     <div class="grid2" style="gap:10px"><div class="field"><label for="mPcs">Limite de PCs</label><input class="in" id="mPcs" type="number" min="1" max="20" value="${k.max_pcs}"></div>
       <div class="field"><label for="mNote">Nota</label><input class="in" id="mNote" value="${esc(k.note || '')}"></div></div>
@@ -261,13 +263,20 @@ function keyModal(id) {
   $$('#modal [data-close]').forEach(a => a.onclick = close);
   $('#mClose').onclick = close;
   $('#mCopy').onclick = () => copy(k.key, 'Key copiada');
-  $$('#modal [data-renew]').forEach(b => b.onclick = async () => {
+  $('#mDaysGo').onclick = () => {
+    const n = Math.round(+$('#mDays').value);
+    if (!(n >= 1 && n <= 3650)) return toast('Digite de 1 a 3650 dias.', true);
+    const b = document.createElement('button'); b.dataset.renew = String(n); renewKey(b);
+  };
+  const renewKey = async b => {
     const v = b.dataset.renew; let patch;
+    if (k.kind === 'lifetime' && v !== 'life') return toast('Esta key é vitalícia: não precisa renovar.');
     if (v === 'life') patch = { kind: 'lifetime', expires_at: null, duration_days: null };
     else if (!k.activated_at) patch = { duration_days: (k.duration_days || 0) + +v };
     else { const base = Math.max(Date.now(), k.expires_at ? new Date(k.expires_at).getTime() : Date.now()); patch = { expires_at: new Date(base + +v * DAY).toISOString() }; }
     if (await act(() => sb.from('license_keys').update(patch).eq('id', k.id), v === 'life' ? 'Agora é vitalícia.' : `Renovada: +${v} dias.`)) { logEv(k.id, 'admin:renew', v === 'life' ? 'vitalícia' : `+${v} dias`); keyModal(k.id); }
-  });
+  };
+  $$('#modal [data-renew]').forEach(b => b.onclick = () => renewKey(b));
   $('#mSave').onclick = async () => {
     const patch = { max_pcs: Math.max(1, +$('#mPcs').value || 1), note: $('#mNote').value || null };
     if (await act(() => sb.from('license_keys').update(patch).eq('id', k.id), 'Salvo.')) { logEv(k.id, 'admin:edit', `limite ${patch.max_pcs}`); keyModal(k.id); }
@@ -278,7 +287,7 @@ function keyModal(id) {
   };
   $('#mBlock').onclick = async () => {
     const block = k.status !== 'blocked';
-    if (block && !confirm('Bloquear esta key? O app do cliente vai pedir uma key nova em até 10 minutos.')) return;
+    if (block && !confirm('Bloquear esta key? O app do cliente vai pedir uma key nova em até 2 minutos.')) return;
     if (await act(() => sb.from('license_keys').update({ status: block ? 'blocked' : 'active' }).eq('id', k.id), block ? 'Key bloqueada.' : 'Key desbloqueada.')) { logEv(k.id, block ? 'admin:block' : 'admin:unblock'); keyModal(k.id); }
   };
   $('#mDel').onclick = async () => {
@@ -361,7 +370,7 @@ function bindPc(id) {
   };
   $('#pBlock').onclick = async () => {
     const block = k.status !== 'blocked';
-    if (block && !confirm('Bloquear a key deste PC? O app vai pedir uma key nova em até 10 minutos.')) return;
+    if (block && !confirm('Bloquear a key deste PC? O app vai pedir uma key nova em até 2 minutos.')) return;
     if (await act(() => sb.from('license_keys').update({ status: block ? 'blocked' : 'active' }).eq('id', k.id), block ? 'Key bloqueada.' : 'Key desbloqueada.')) logEv(k.id, block ? 'admin:block' : 'admin:unblock', m.pc_name);
   };
 }
