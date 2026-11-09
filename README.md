@@ -18,6 +18,7 @@
 - **Internet:** DNS, correções de rede e teste de velocidade.
 - **Processador e memória:** desbloqueio de núcleos, limite de velocidade e limpeza automática da RAM.
 - **Limpeza:** arquivos temporários, cache de apps e lixo do Windows.
+- **Medidor de FPS:** contador de FPS por cima do jogo (com atalho para ligar e desligar) e comparação de antes e depois das otimizações.
 - **Hardware:** informações de cada peça, temperaturas em tempo real, testes de estresse e saúde da bateria.
 - **Tudo reversível:** cada ajuste pode ser desfeito, e há o botão **Reverter tudo**.
 
