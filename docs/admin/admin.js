@@ -46,13 +46,17 @@ function keyState(k) {
   if (k.status === 'blocked') return 'blocked';
   if (k.expires_at && new Date(k.expires_at) < Date.now()) return 'expired';
   if (!k.activated_at) return 'unused';
-  if (k.expires_at && new Date(k.expires_at) - Date.now() < 7 * DAY) return 'soon';
+  if (k.expires_at && new Date(k.expires_at) - Date.now() <= 5 * DAY) return 'soon';   // vence em até 5 dias
   return 'active';
 }
 const ST = { active: ['Ativa', 'p-ok'], soon: ['Vence logo', 'p-warn'], unused: ['Não usada', 'p-off'], expired: ['Expirada', 'p-off'], blocked: ['Bloqueada', 'p-bad'] };
 const stPill = k => { const [t, c] = ST[keyState(k)]; return `<span class="pill ${c}">${t}</span>`; };
 const kindTxt = k => k.kind === 'lifetime' ? 'Vitalícia' : `${k.duration_days || '?'} dias`;
-const expTxt = k => k.kind === 'lifetime' ? '—' : k.expires_at ? fmtDate(k.expires_at) : 'Ao ativar';
+// vencimento com a cor: verde com mais de 5 dias, amarelo com 5 dias ou menos, cinza se já venceu
+const daysLeft = k => k.expires_at ? Math.ceil((new Date(k.expires_at) - Date.now()) / DAY) : null;
+const expTxt = k => { if (k.kind === 'lifetime') return '—'; if (!k.expires_at) return 'Ao ativar'; const d = daysLeft(k);
+  const c = d <= 0 ? 'var(--muted)' : d <= 5 ? 'var(--warn)' : 'var(--ok)';
+  return `<span style="color:${c}">${fmtDate(k.expires_at)}${d > 0 ? ` · ${d} ${d === 1 ? 'dia' : 'dias'}` : ''}</span>`; };
 const keyOf = id => D.keys.find(k => k.id === id);
 const userOf = id => D.users.find(u => u.id === id);
 const pcsOf = k => D.machines.filter(m => m.key_id === k.id && !m.released);
@@ -79,7 +83,7 @@ async function act(fn, okMsg) {
 // ---------- telas de entrada ----------
 function showLogin(msg) {
   $('#app').innerHTML = `<div class="login"><div class="card">
-    <div class="brand"><i>${'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#02121a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>'}</i><div><b>ANTHARIS</b><small>BOOSTER</small></div></div>
+    <div class="brand"><i class="logo"><img src="icon.png" alt=""></i><div><b>ANTHARIS</b><small>BOOSTER</small></div></div>
     <h1>Painel admin</h1><p class="muted" style="margin:0">Entre com a sua conta do Discord. Só contas marcadas como admin conseguem ver os dados.</p>
     ${msg ? `<div class="toast err" style="animation:none">${esc(msg)}</div>` : ''}
     <button class="dc" id="dcLogin">${DC_ICON}Entrar com Discord</button></div></div>`;
@@ -139,7 +143,7 @@ function openBell() {
 function shell(active, inner) {
   const meName = D.me && D.me.user_metadata && (D.me.user_metadata.full_name || D.me.user_metadata.name) || (D.me && D.me.email) || 'admin';
   return `<div class="shell"><nav class="side">
-    <div class="brand"><i><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#02121a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></i><div><b>ANTHARIS</b><small>BOOSTER</small></div></div>
+    <div class="brand"><i class="logo"><img src="icon.png" alt=""></i><div><b>ANTHARIS</b><small>BOOSTER</small></div></div>
     <div class="sub">Painel admin <button class="bell ${unreadLimits().length ? 'has' : ''}" id="bell" aria-label="Avisos de tentativas em outro PC" title="Tentativas de usar a key em outro PC">${BELL}${unreadLimits().length ? `<em>${unreadLimits().length}</em>` : ''}</button></div>
     ${PAGES.map(([id, t]) => `<a class="nav ${active === id ? 'on' : ''}" href="#${id}">${ic(id)}${t}</a>`).join('')}
     <div class="me"><span>Logado como ${esc(meName)}</span><button id="refresh">Atualizar dados</button><button id="logout">Sair do admin</button></div>
@@ -177,7 +181,7 @@ function pgOverview() {
       <div class="stat"><small>Keys ativas</small><b>${st.filter(s => s === 'active' || s === 'soon').length}</b><span>${st.filter(s => s === 'unused').length} ainda não usadas</span></div>
       <div class="stat"><small>PCs online agora</small><b style="color:var(--cyan)">${on}</b><span>de ${act} PCs ativados</span></div>
       <div class="stat" role="button" tabindex="0" id="stLimit" style="cursor:pointer"><small>Tentativas em outro PC</small><b style="color:${unreadLimits().length ? 'var(--bad)' : 'var(--text)'}">${limitEvents().filter(e => Date.now() - new Date(e.created_at) < 7 * DAY).length}</b><span>${unreadLimits().length ? unreadLimits().length + ' nova(s) · clique para ver' : 'últimos 7 dias'}</span></div>
-      <div class="stat"><small>Vencem em 7 dias</small><b style="color:var(--warn)">${st.filter(s => s === 'soon').length}</b><span>${st.filter(s => s === 'blocked').length} bloqueadas</span></div>
+      <div class="stat"><small>Vencem em 5 dias</small><b style="color:var(--warn)">${st.filter(s => s === 'soon').length}</b><span>${st.filter(s => s === 'blocked').length} bloqueadas</span></div>
     </div>
     <div class="row">
       <section class="card" style="flex:3 1 460px;min-width:0"><h2>Ativações por dia (30 dias)</h2>
@@ -294,7 +298,7 @@ function keyModal(id) {
     <div class="row" style="gap:8px">
       <button class="btn sm" id="mSave">Salvar limite e nota</button>
       <button class="btn sm" id="mCopy">Copiar key</button>
-      <button class="btn sm" id="mRel" ${ms.some(m => !m.released) ? '' : 'disabled'}>Liberar troca de PC</button>
+      <button class="btn sm" id="mRel" title="Desconecta os PCs desta key e libera a vaga para o cliente ativar em outro PC" ${ms.some(m => !m.released) ? '' : 'disabled'}>Liberar troca de PC</button>
       <button class="btn sm ${k.status === 'blocked' ? 'cy' : 'red'}" id="mBlock">${k.status === 'blocked' ? 'Desbloquear' : 'Bloquear'}</button>
       <button class="btn sm red" id="mDel">Apagar key</button>
       <button class="btn sm" id="mClose" style="margin-left:auto">Fechar</button>
@@ -322,8 +326,8 @@ function keyModal(id) {
     if (await act(() => sb.from('license_keys').update(patch).eq('id', k.id), 'Salvo.')) { logEv(k.id, 'admin:edit', `limite ${patch.max_pcs}`); keyModal(k.id); }
   };
   $('#mRel').onclick = async () => {
-    if (!confirm('Liberar os PCs desta key? O cliente vai poder ativar em outro PC.')) return;
-    if (await act(() => sb.from('machines').update({ released: true }).eq('key_id', k.id), 'PCs liberados. O cliente já pode ativar no PC novo.')) { logEv(k.id, 'admin:release'); keyModal(k.id); }
+    if (!confirm('Liberar troca de PC?\n\nO PC atual é desconectado da key: o app dele volta para a tela de ativação em até 2 minutos e não entra sozinho de novo. A vaga fica livre para o cliente ativar no PC novo (com a key ou entrando com a conta).')) return;
+    if (await act(() => sb.from('machines').update({ released: true, kicked: true }).eq('key_id', k.id), 'PC desconectado. O cliente já pode ativar no PC novo.')) { logEv(k.id, 'admin:release'); keyModal(k.id); }
   };
   $('#mBlock').onclick = async () => {
     const block = k.status !== 'blocked';
@@ -384,7 +388,7 @@ function pgPc(id) {
   return `<a href="#pcs" style="font-size:13px;text-decoration:none">← Voltar para PCs ativos</a>` +
     head(`${esc(m.pc_name || 'PC')} ${blocked ? '<span class="pill p-bad">Bloqueado</span>' : online(m) ? '<span class="pill p-ok">Online</span>' : '<span class="pill p-off">Offline</span>'}`,
       `${u ? `Dono: <b style="color:#b9c1ff">${esc(u.name)}</b> · ` : ''}Key <span class="mono" style="color:var(--soft)">${esc(k ? k.key : '?')}</span> · ${k ? kindTxt(k) + (k.expires_at ? ' · vence ' + fmtDate(k.expires_at) : '') : ''} · último relatório ${ago(r.at || m.last_seen)}`,
-      `<div class="row" style="gap:8px"><button class="btn cy" id="pRenew">Renovar +30 dias</button><button class="btn" id="pRel">Liberar troca de PC</button><button class="btn ${blocked ? 'cy' : 'red'}" id="pBlock">${blocked ? 'Desbloquear' : 'Bloquear'}</button><button class="btn" id="pKey">Ver key</button></div>`) + `
+      `<div class="row" style="gap:8px"><button class="btn cy" id="pRenew">Renovar +30 dias</button><button class="btn" id="pRel" title="Desconecta este PC e libera a vaga para outro PC">Liberar troca de PC</button><button class="btn ${blocked ? 'cy' : 'red'}" id="pBlock">${blocked ? 'Desbloquear' : 'Bloquear'}</button><button class="btn" id="pKey">Ver key</button></div>`) + `
     ${m.report ? '' : '<div class="card muted">Este PC ainda não mandou o relatório. Ele chega uns 2 minutos depois de abrir o app e é atualizado a cada 10 minutos.</div>'}
     <div class="row">
       <section class="card" style="flex:3 1 420px;min-width:0"><h2 style="font-size:13px;letter-spacing:.1em;color:var(--muted)">HARDWARE</h2>${hw.map(([a, b]) => `<div class="kv"><span>${a}</span><span>${esc(b)}</span></div>`).join('')}</section>
@@ -405,8 +409,8 @@ function bindPc(id) {
     if (await act(() => sb.from('license_keys').update(patch).eq('id', k.id), 'Renovada: +30 dias.')) logEv(k.id, 'admin:renew', '+30 dias');
   };
   $('#pRel').onclick = async () => {
-    if (!confirm('Liberar este PC? A vaga fica livre e o cliente pode ativar em outro PC.')) return;
-    if (await act(() => sb.from('machines').update({ released: true }).eq('id', m.id), 'PC liberado.')) { logEv(k.id, 'admin:release', m.pc_name); location.hash = 'pcs'; }
+    if (!confirm('Liberar este PC?\n\nEle é desconectado da key: o app volta para a tela de ativação em até 2 minutos e não entra sozinho de novo. A vaga fica livre para o cliente ativar em outro PC.')) return;
+    if (await act(() => sb.from('machines').update({ released: true, kicked: true }).eq('id', m.id), 'PC desconectado e vaga liberada.')) { logEv(k.id, 'admin:release', m.pc_name); location.hash = 'pcs'; }
   };
   $('#pBlock').onclick = async () => {
     const block = k.status !== 'blocked';

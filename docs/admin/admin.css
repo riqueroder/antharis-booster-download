@@ -133,3 +133,56 @@ pre.sql { background: var(--card2); border: 1px solid var(--line); border-radius
 .alert:hover { border-color: #2a3c58; } .alert.new { border-color: rgba(245,184,61,.45); background: rgba(245,184,61,.05); }
 .alert .al-ic { width: 34px; height: 34px; border-radius: 10px; background: rgba(255,122,147,.12); color: var(--bad); display: grid; place-items: center; flex: none; }
 .alert .al-d { font-size: 13px; color: var(--soft); margin-top: 3px; } .alert small { display: block; font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+
+/* =================== tema Aurora roxa (igual ao app) =================== */
+:root {
+  --bg: #08041a; --side: rgba(16,7,40,.62); --card: rgba(20,9,46,.62); --card2: rgba(10,4,28,.55); --line: rgba(255,255,255,.09); --line2: rgba(255,255,255,.14);
+  --text: #fff; --soft: #ddd6f5; --muted: #a49bc8; --cyan: #c4a5ff; --cyan-t: #fff; --blue: #7c3aed;
+  --grad: linear-gradient(90deg, #a83fd0, #7445d6 55%, #4f52cc);
+}
+html, body { background: var(--bg); }
+body { min-height: 100vh; }
+a { color: #c4b5fd; } a:hover { color: #e9d5ff; }
+/* névoa roxa se movendo no fundo */
+.fog { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+.fog i { position: absolute; border-radius: 50%; filter: blur(80px); will-change: transform; }
+.fog .f1 { width: 760px; height: 520px; right: -10%; top: -14%; background: radial-gradient(circle, rgba(124,58,237,.42), transparent 68%); animation: fogA 34s ease-in-out infinite alternate; }
+.fog .f2 { width: 820px; height: 560px; left: 2%; bottom: -20%; background: radial-gradient(circle, rgba(91,33,182,.38), transparent 68%); animation: fogB 41s ease-in-out infinite alternate; }
+.fog .f3 { width: 520px; height: 420px; left: 40%; top: 30%; background: radial-gradient(circle, rgba(168,63,208,.18), transparent 68%); animation: fogA 52s ease-in-out infinite alternate-reverse; }
+@keyframes fogA { 50% { transform: translate(-30vw, 22vh) scale(1.2); } 100% { transform: translate(-52vw, 6vh) scale(.95); } }
+@keyframes fogB { 50% { transform: translate(30vw, -26vh) scale(1.15); } 100% { transform: translate(50vw, -8vh); } }
+@media (prefers-reduced-motion: reduce) { .fog i { animation: none; } }
+#app, #modal, #toasts { position: relative; z-index: 1; }
+/* marca com o ícone da Antharis */
+.brand i.logo { width: 38px; height: 38px; border-radius: 11px; background: none; overflow: hidden; box-shadow: 0 0 18px rgba(167,139,250,.45); }
+.brand i.logo img { width: 100%; height: 100%; display: block; }
+.brand small { color: #b6a8e6; }
+/* peças */
+.side { background: var(--side); backdrop-filter: blur(20px); border-right: 1px solid rgba(255,255,255,.08); }
+.side .me { border-top-color: rgba(255,255,255,.08); }
+.nav { color: #c3b9e6; } .nav:hover { background: rgba(167,139,250,.08); }
+.nav.on { background: linear-gradient(90deg, rgba(168,63,208,.28), rgba(79,82,204,.14)); color: #fff; box-shadow: inset 0 0 0 1px rgba(196,165,255,.32); }
+.card, .stat, .tbl-wrap, .pc, #modal .box { backdrop-filter: blur(16px); box-shadow: 0 20px 50px rgba(8,0,30,.3); }
+.card, .stat, .tbl-wrap, .pc { border-color: rgba(255,255,255,.1); }
+.pc:hover, .alert:hover, .btn:hover { border-color: rgba(196,165,255,.45); }
+.btn { background: rgba(255,255,255,.04); }
+.btn.pri { background: var(--grad); color: #fff; box-shadow: 0 8px 24px rgba(168,63,208,.32); }
+.btn.cy { border-color: rgba(196,165,255,.6); background: rgba(124,58,237,.16); color: #e9d5ff; }
+.btn.red { border-color: rgba(255,122,147,.45); background: rgba(255,122,147,.1); }
+.chip { color: #c3b9e6; } .chip.on { border-color: rgba(196,165,255,.7); background: rgba(124,58,237,.22); color: #fff; }
+.seg button { color: #c3b9e6; } .seg button.on { background: rgba(124,58,237,.35); color: #fff; }
+.in { background: rgba(10,4,28,.6); } .in:focus { border-color: #a78bfa; box-shadow: 0 0 0 3px rgba(167,139,250,.18); }
+.tg { background: rgba(255,255,255,.12); } .tg.on { background: #8b5cf6; } .tg.on::after { background: #fff; }
+.p-ok { background: rgba(52,224,161,.12); } .p-warn { background: rgba(245,184,61,.12); } .p-bad { background: rgba(255,122,147,.12); }
+.p-off { background: rgba(255,255,255,.07); color: #b2a9d4; } .p-cy { background: rgba(124,58,237,.22); color: #e9d5ff; } .p-dc { background: rgba(88,101,242,.22); }
+td { border-top-color: rgba(255,255,255,.06); } tr.click:hover td { background: rgba(167,139,250,.06); }
+.kv, .feed, .pc .f { border-color: rgba(255,255,255,.06); }
+.av { background: #2a1557; color: #ddd6fe; }
+.bar, .split { background: rgba(255,255,255,.07); } .bar i { background: var(--grad); }
+.tcell { background: rgba(10,4,28,.5); border-color: rgba(255,255,255,.08); }
+.newkeys { background: rgba(52,224,161,.06); border-color: rgba(52,224,161,.3); }
+.spin { border-color: rgba(196,165,255,.25); border-top-color: #c4a5ff; }
+.login { background: transparent; } .login .card { box-shadow: 0 40px 100px rgba(6,0,24,.6), inset 0 1px 0 rgba(255,255,255,.12); }
+.toast { background: rgba(24,10,56,.95); border-color: rgba(196,165,255,.35); }
+.bell { background: rgba(255,255,255,.04); }
+.alert { background: rgba(10,4,28,.5); }
