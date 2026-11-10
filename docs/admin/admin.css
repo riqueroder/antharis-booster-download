@@ -186,3 +186,7 @@ td { border-top-color: rgba(255,255,255,.06); } tr.click:hover td { background: 
 .toast { background: rgba(24,10,56,.95); border-color: rgba(196,165,255,.35); }
 .bell { background: rgba(255,255,255,.04); }
 .alert { background: rgba(10,4,28,.5); }
+/* lixeira */
+.trash { display: flex; flex-direction: column; gap: 14px; }
+.tr-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.tr-item .pc { background: rgba(255,255,255,.03); }

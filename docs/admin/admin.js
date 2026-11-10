@@ -8,7 +8,7 @@ const ONLINE_MS = 15 * 60e3, DAY = 86400e3;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const D = { keys: [], machines: [], events: [], users: [], me: null, at: 0 };
+const D = { keys: [], machines: [], events: [], users: [], trash: [], trashOff: false, me: null, at: 0 };
 const UI = { keyFilter: 'all', keyQ: '', userQ: '', userProv: 'all', pcQ: '', pcFilter: 'all', period: 90, newKeys: null, create: { kind: 'days', days: 30, pcs: 1, qty: 1, tester: false, note: '' } };
 
 // ---------- ícones ----------
@@ -19,6 +19,7 @@ const I = {
   pcs: '<rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
   metrics: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>',
   versions: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7"/><path d="M18 11.5c0 3-3 4-9.5 5.5"/>',
+  trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>',
   audit: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
 };
 const ic = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
@@ -73,6 +74,9 @@ async function loadAll() {
   const err = k.error || m.error || e.error || u.error;
   if (err) throw err;
   D.keys = k.data; D.machines = m.data; D.events = e.data; D.users = u.data; D.at = Date.now();
+  // lixeira: se o patch 1.0.8 ainda não foi rodado no Supabase, o resto do painel continua funcionando
+  const t = await sb.from('key_trash').select('*').order('deleted_at', { ascending: false });
+  D.trashOff = !!t.error; D.trash = t.error ? [] : t.data;
 }
 async function logEv(key_id, kind, detail) { try { await sb.from('events').insert({ key_id, kind, detail }); } catch {} }
 async function act(fn, okMsg) {
@@ -101,8 +105,8 @@ function showNotAdmin(user) {
 }
 
 // ---------- estrutura ----------
-const PAGES = [['overview', 'Visão geral'], ['users', 'Usuários'], ['keys', 'Keys'], ['pcs', 'PCs ativos'], ['metrics', 'Métricas'], ['versions', 'Versões'], ['audit', 'Auditoria']];
-function route() { const h = location.hash.replace('#', '') || 'overview'; const [p, id] = h.split('/'); return { p, id }; }
+const PAGES = [['overview', 'Visão geral'], ['users', 'Usuários'], ['keys', 'Keys'], ['pcs', 'PCs ativos'], ['metrics', 'Métricas'], ['versions', 'Versões'], ['audit', 'Auditoria'], ['trash', 'Lixeira']];
+function route() { const h = location.hash.replace('#', '') || 'overview'; const [p, id, sub] = h.split('/'); return { p, id, sub }; }
 // ---------- avisos: alguém tentou usar uma key em outro PC ----------
 const BELL = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
 const seenAt = () => { try { return +localStorage.getItem('ab.seenLimit') || 0; } catch { return 0; } };
@@ -150,14 +154,14 @@ function shell(active, inner) {
   </nav><main class="main">${inner}</main></div>`;
 }
 function render() {
-  const { p, id } = route();
-  const fn = { overview: pgOverview, users: pgUsers, keys: pgKeys, pcs: pgPcs, pc: () => pgPc(id), metrics: pgMetrics, versions: pgVersions, audit: pgAudit }[p] || pgOverview;
+  const { p, id, sub } = route();
+  const fn = { trash: () => id ? pgTrashPc(id, sub) : pgTrash(),overview: pgOverview, users: pgUsers, keys: pgKeys, pcs: pgPcs, pc: () => pgPc(id), metrics: pgMetrics, versions: pgVersions, audit: pgAudit }[p] || pgOverview;
   const act = p === 'pc' ? 'pcs' : p;
   $('#app').innerHTML = shell(act, fn());
   $('#logout').onclick = async () => { await sb.auth.signOut(); location.hash = ''; showLogin(); };
   $('#refresh').onclick = async () => { await loadAll(); checkNewLimits(); render(); toast('Dados atualizados.'); };
   $('#bell').onclick = openBell;
-  const after = { overview: () => { const x = $('#stLimit'); if (x) x.onclick = openBell; }, keys: bindKeys, users: bindUsers, pcs: bindPcs, pc: () => bindPc(id), versions: bindVersions, metrics: bindMetrics }[p];
+  const after = { overview: () => { const x = $('#stLimit'); if (x) x.onclick = openBell; }, keys: bindKeys, users: bindUsers, pcs: bindPcs, pc: () => bindPc(id), versions: bindVersions, metrics: bindMetrics, trash: () => id ? bindTrashPc(id) : bindTrash() }[p];
   if (after) after();
 }
 window.addEventListener('hashchange', () => { if (D.me) { render(); window.scrollTo(0, 0); } });
@@ -335,9 +339,15 @@ function keyModal(id) {
     if (await act(() => sb.from('license_keys').update({ status: block ? 'blocked' : 'active' }).eq('id', k.id), block ? 'Key bloqueada.' : 'Key desbloqueada.')) { logEv(k.id, block ? 'admin:block' : 'admin:unblock'); keyModal(k.id); }
   };
   $('#mDel').onclick = async () => {
-    if (!confirm(`Apagar a key ${k.key} de vez? Os PCs dela perdem o acesso. Não dá para desfazer.`)) return;
+    if (D.trashOff) {   // patch da lixeira ainda não rodado: apaga direto, como antes
+      if (!confirm(`Apagar a key ${k.key} de vez? Os PCs dela perdem o acesso. Não dá para desfazer.`)) return;
+      await logEv(null, 'admin:delete', k.key);
+      if (await act(() => sb.from('license_keys').delete().eq('id', k.id), 'Key apagada.')) close();
+      return;
+    }
+    if (!confirm(`Apagar a key ${k.key}?\n\nOs PCs dela perdem o acesso. A key vai para a Lixeira junto com as informações dos PCs, e dá para restaurar depois.`)) return;
     await logEv(null, 'admin:delete', k.key);
-    if (await act(() => sb.from('license_keys').delete().eq('id', k.id), 'Key apagada.')) close();
+    if (await act(() => sb.rpc('admin_trash_key', { p_id: k.id }), 'Key movida para a Lixeira.')) close();
   };
 }
 
@@ -366,7 +376,10 @@ const GB = b => b ? (b / 1073741824 >= 1000 ? (b / 1099511627776).toFixed(1) + '
 function pgPc(id) {
   const m = D.machines.find(x => x.id === id);
   if (!m) return head('PC não encontrado', '<a href="#pcs">← Voltar para PCs ativos</a>');
-  const k = keyOf(m.key_id); const u = k && k.owner && userOf(k.owner); const r = m.report || {}; const s = r.specs || {};
+  return pcView(m, keyOf(m.key_id));
+}
+function pcView(m, k, trash) {
+  const u = k && k.owner && userOf(k.owner); const r = m.report || {}; const s = r.specs || {};
   const hw = [];
   const cpu = s.cpu || {};
   hw.push(['Processador', `${cpuClean(cpu.name || r.cpu) || '?'}${cpu.cores ? ` · ${cpu.cores} núcleos / ${cpu.threads} threads` : r.threads ? ` · ${r.threads} threads` : ''}`]);
@@ -385,11 +398,14 @@ function pgPc(id) {
     ['Limpeza automática da RAM', set.memAuto && set.memAuto.on ? (set.memAuto.mode === 'pct' ? `Ao passar de ${set.memAuto.pct}%` : `A cada ${set.memAuto.min} min`) : 'Desligada', set.memAuto && set.memAuto.on],
     ['Ajustes aplicados', set.tweaks ? `${set.tweaks.length}` : '?', set.tweaks && set.tweaks.length]];
   const blocked = k && k.status === 'blocked';
-  return `<a href="#pcs" style="font-size:13px;text-decoration:none">← Voltar para PCs ativos</a>` +
-    head(`${esc(m.pc_name || 'PC')} ${blocked ? '<span class="pill p-bad">Bloqueado</span>' : online(m) ? '<span class="pill p-ok">Online</span>' : '<span class="pill p-off">Offline</span>'}`,
-      `${u ? `Dono: <b style="color:#b9c1ff">${esc(u.name)}</b> · ` : ''}Key <span class="mono" style="color:var(--soft)">${esc(k ? k.key : '?')}</span> · ${k ? kindTxt(k) + (k.expires_at ? ' · vence ' + fmtDate(k.expires_at) : '') : ''} · último relatório ${ago(r.at || m.last_seen)}`,
-      `<div class="row" style="gap:8px"><button class="btn cy" id="pRenew">Renovar +30 dias</button><button class="btn" id="pRel" title="Desconecta este PC e libera a vaga para outro PC">Liberar troca de PC</button><button class="btn ${blocked ? 'cy' : 'red'}" id="pBlock">${blocked ? 'Desbloquear' : 'Bloquear'}</button><button class="btn" id="pKey">Ver key</button></div>`) + `
-    ${m.report ? '' : '<div class="card muted">Este PC ainda não mandou o relatório. Ele chega uns 2 minutos depois de abrir o app e é atualizado a cada 10 minutos.</div>'}
+  const pill = trash ? '<span class="pill p-bad">Key apagada</span>' : blocked ? '<span class="pill p-bad">Bloqueado</span>' : online(m) ? '<span class="pill p-ok">Online</span>' : '<span class="pill p-off">Offline</span>';
+  const back = trash ? `<a href="#trash" style="font-size:13px;text-decoration:none">← Voltar para a Lixeira</a>` : `<a href="#pcs" style="font-size:13px;text-decoration:none">← Voltar para PCs ativos</a>`;
+  const btns = trash ? `<div class="row" style="gap:8px"><button class="btn cy" id="tRest">Restaurar key</button></div>`
+    : `<div class="row" style="gap:8px"><button class="btn cy" id="pRenew">Renovar +30 dias</button><button class="btn" id="pRel" title="Desconecta este PC e libera a vaga para outro PC">Liberar troca de PC</button><button class="btn ${blocked ? 'cy' : 'red'}" id="pBlock">${blocked ? 'Desbloquear' : 'Bloquear'}</button><button class="btn" id="pKey">Ver key</button></div>`;
+  return back +
+    head(`${esc(m.pc_name || 'PC')} ${pill}`,
+      `${u ? `Dono: <b style="color:#b9c1ff">${esc(u.name)}</b> · ` : ''}Key <span class="mono" style="color:var(--soft)">${esc(k ? k.key : '?')}</span> · ${k ? kindTxt(k) + (k.expires_at ? (trash ? ' · vencia ' : ' · vence ') + fmtDate(k.expires_at) : '') : ''} · último relatório ${ago(r.at || m.last_seen)}${trash ? ` · apagada ${ago(trash.deleted_at)}` : ''}`, btns) + `
+    ${m.report ? '' : trash ? '<div class="card muted">Este PC não tinha mandado o relatório antes da key ser apagada.</div>' : '<div class="card muted">Este PC ainda não mandou o relatório. Ele chega uns 2 minutos depois de abrir o app e é atualizado a cada 10 minutos.</div>'}
     <div class="row">
       <section class="card" style="flex:3 1 420px;min-width:0"><h2 style="font-size:13px;letter-spacing:.1em;color:var(--muted)">HARDWARE</h2>${hw.map(([a, b]) => `<div class="kv"><span>${a}</span><span>${esc(b)}</span></div>`).join('')}</section>
       <div style="flex:2 1 300px;min-width:0;display:flex;flex-direction:column;gap:16px">
@@ -506,3 +522,40 @@ async function boot() {
   }
 }
 boot();
+
+// ---------- Lixeira: keys apagadas, com os PCs que estavam nelas ----------
+const trashOf = id => D.trash.find(t => String(t.id) === String(id));
+function pgTrash() {
+  if (D.trashOff) return head('Lixeira', 'Keys apagadas ficam guardadas aqui, com as informações dos PCs.') + `<div class="card"><b>Falta ligar a Lixeira no Supabase.</b>
+    <p class="muted" style="margin:8px 0 0">Abra o Supabase → <b>SQL Editor</b> → <b>New query</b>, cole o arquivo <span class="mono">supabase/patch-1.0.8.sql</span> e clique em <b>Run</b>. Depois clique em <b>Atualizar dados</b>.</p></div>`;
+  return head('Lixeira', `${D.trash.length} ${D.trash.length === 1 ? 'key apagada' : 'keys apagadas'}. Clique num PC para ver as informações dele, igual à tela de PCs ativos.`) + `
+    <div class="trash">${D.trash.map(t => { const k = t.key_row || {}; const u = k.owner && userOf(k.owner); const ms = t.machines || [];
+      return `<section class="card tr-item"><div class="tr-h"><div style="min-width:0"><b class="mono">${esc(t.key)}</b>
+          <div class="muted" style="font-size:12.5px;margin-top:4px">${u ? 'Dono: ' + esc(u.name) + ' · ' : k.note ? esc(k.note) + ' · ' : ''}${esc(kindTxt(k))}${k.tester ? ' · Tester' : ''}${k.activated_at ? ' · ativada ' + fmtDate(k.activated_at) : ' · nunca ativada'}${k.expires_at ? ' · vencia ' + fmtDate(k.expires_at) : ''}</div>
+          <div class="muted" style="font-size:12px;margin-top:2px">Apagada ${ago(t.deleted_at)} · ${fmtDT(t.deleted_at)}</div></div>
+        <div class="row" style="gap:8px;flex:none"><button class="btn cy sm" data-rest="${t.id}">Restaurar</button><button class="btn red sm" data-purge="${t.id}">Apagar de vez</button></div></div>
+        ${ms.length ? `<div class="pcs" style="margin-top:12px">${ms.map((m, i) => { const r = m.report;
+          return `<a class="pc" href="#trash/${t.id}/${i}"><div class="t"><b>${esc(m.pc_name || 'PC')}</b><span class="pill p-off">v${esc(m.app_version || '?')}</span></div>
+            <div class="s"><div>${esc(cpuClean(r && (r.specs && r.specs.cpu ? r.specs.cpu.name : r.cpu)) || 'Sem relatório')}</div><div>${esc(gpuList(r).join(' + ') || '')}</div><div>${esc(ramTxt(r))}</div></div>
+            <div class="f"><span>Ativado ${fmtDate(m.first_seen)}</span><span>visto ${ago(m.last_seen)}</span></div></a>`; }).join('')}</div>` : '<div class="muted" style="margin-top:10px;font-size:13px">Esta key nunca foi ativada em nenhum PC.</div>'}
+      </section>`; }).join('') || '<div class="empty">A lixeira está vazia. Quando você apagar uma key, ela aparece aqui.</div>'}</div>`;
+}
+async function restoreTrash(id) {
+  const t = trashOf(id); if (!t) return;
+  if (!confirm(`Restaurar a key ${t.key}?\n\nEla volta para a lista de keys com os mesmos PCs, prazo e dono de antes.`)) return;
+  if (await act(() => sb.rpc('admin_restore_key', { p_trash: t.id }), 'Key restaurada.')) { logEv(t.key_id, 'admin:restore'); location.hash = 'keys'; }
+}
+function bindTrash() {
+  $$('[data-rest]').forEach(b => b.onclick = () => restoreTrash(b.dataset.rest));
+  $$('[data-purge]').forEach(b => b.onclick = async () => {
+    const t = trashOf(b.dataset.purge); if (!t) return;
+    if (!confirm(`Apagar a key ${t.key} de vez da lixeira?\n\nAs informações dos PCs dela somem também. Não dá para desfazer.`)) return;
+    await act(() => sb.from('key_trash').delete().eq('id', t.id), 'Apagada da lixeira.');
+  });
+}
+function pgTrashPc(id, i) {
+  const t = trashOf(id); const m = t && (t.machines || [])[+i || 0];
+  if (!m) return head('Não encontrado', '<a href="#trash">← Voltar para a Lixeira</a>');
+  return pcView(m, t.key_row || {}, t);
+}
+function bindTrashPc(id) { const b = $('#tRest'); if (b) b.onclick = () => restoreTrash(id); }
