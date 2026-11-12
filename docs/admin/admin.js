@@ -9,7 +9,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const D = { keys: [], machines: [], events: [], users: [], trash: [], trashOff: false, me: null, at: 0 };
-const UI = { keyFilter: 'all', keyQ: '', userQ: '', userProv: 'all', pcQ: '', pcFilter: 'all', period: 90, newKeys: null, create: { kind: 'days', days: 30, pcs: 1, qty: 1, tester: false, note: '' } };
+const UI = { keySel: new Set(), keyFilter: 'all', keyQ: '', userQ: '', userProv: 'all', pcQ: '', pcFilter: 'all', period: 90, newKeys: null, create: { kind: 'days', days: 30, pcs: 1, qty: 1, tester: false, note: '' } };
 
 // ---------- ícones ----------
 const I = {
@@ -225,10 +225,41 @@ function pgUsers() {
 function bindUsers() {
   const uq = $('#uq'); uq.oninput = () => { UI.userQ = uq.value; const pos = uq.selectionStart; render(); const n = $('#uq'); n.focus(); n.setSelectionRange(pos, pos); };
   $$('[data-up]').forEach(b => b.onclick = () => { UI.userProv = b.dataset.up; render(); });
-  $$('tr[data-key]').forEach(r => r.onclick = () => keyModal(r.dataset.key));
+  $$('tr[data-key]').forEach(r => r.onclick = e => { if (e.target.closest('.ck')) return; keyModal(r.dataset.key); });
+  $$('[data-ks]').forEach(c => c.onchange = () => { c.checked ? UI.keySel.add(c.dataset.ks) : UI.keySel.delete(c.dataset.ks); render(); });
+  $$('td.ck').forEach(td => td.onclick = e => { if (e.target.tagName !== 'INPUT') { const c = td.querySelector('input'); c.checked = !c.checked; c.onchange(); } });
+  const ka = $('#kAll'); if (ka) ka.onchange = () => { const l = keysListed(); if (ka.checked) l.forEach(k => UI.keySel.add(k.id)); else l.forEach(k => UI.keySel.delete(k.id)); render(); };
+  const sel = () => D.keys.filter(k => UI.keySel.has(k.id));
+  const bn = $('#bNone'); if (bn) bn.onclick = () => { UI.keySel.clear(); render(); };
+  const bc = $('#bCopy'); if (bc) bc.onclick = () => copy(sel().map(k => k.key).join('\n'), `${sel().length} key(s) copiada(s)`);
+  const bb = $('#bBlock'); if (bb) bb.onclick = async () => {
+    const l = sel().filter(k => k.status !== 'blocked'); if (!l.length) return toast('As keys selecionadas já estão bloqueadas.');
+    if (!confirm(`Bloquear ${l.length} key(s)? Os PCs delas perdem o acesso na próxima verificação.`)) return;
+    await bulkRun(l, async k => { const r = await sb.from('license_keys').update({ status: 'blocked' }).eq('id', k.id); if (!r.error) logEv(k.id, 'admin:block'); return r; }, n => `${n} key(s) bloqueada(s).`);
+  };
+  const bd = $('#bDel'); if (bd) bd.onclick = async () => {
+    const l = sel();
+    if (!confirm(D.trashOff ? `Apagar ${l.length} key(s) de vez? Os PCs delas perdem o acesso. Não dá para desfazer.` : `Apagar ${l.length} key(s)?\n\nOs PCs delas perdem o acesso. As keys vão para a Lixeira e dá para restaurar depois.`)) return;
+    await bulkRun(l, async k => { await logEv(null, 'admin:delete', k.key); return D.trashOff ? sb.from('license_keys').delete().eq('id', k.id) : sb.rpc('admin_trash_key', { p_id: k.id }); }, n => D.trashOff ? `${n} key(s) apagada(s).` : `${n} key(s) movida(s) para a Lixeira.`);
+  };
+  const ke = $('#kExp'); if (ke) ke.onclick = async () => {
+    const l = usedExpired();
+    if (!confirm(`Desativar ${l.length} key(s) que já foram usadas e já venceram?\n\nElas ficam bloqueadas: não dá para renovar sem desbloquear antes. As keys não usadas e as ativas não mudam.`)) return;
+    await bulkRun(l, async k => { const r = await sb.from('license_keys').update({ status: 'blocked' }).eq('id', k.id); if (!r.error) logEv(k.id, 'admin:block', 'expirada'); return r; }, n => `${n} key(s) expirada(s) desativada(s).`);
+  };
 }
 
 // ---------- Keys ----------
+// keys que já foram ativadas e já venceram (e ainda não estão bloqueadas)
+const usedExpired = () => D.keys.filter(k => k.activated_at && k.status !== 'blocked' && k.expires_at && new Date(k.expires_at) < Date.now());
+const keysListed = () => { const q = UI.keyQ.toLowerCase(); return D.keys.filter(k => UI.keyFilter === 'all' || keyState(k) === UI.keyFilter || (UI.keyFilter === 'active' && keyState(k) === 'soon')).filter(k => !q || [k.key, k.note, ownerName(k)].join(' ').toLowerCase().includes(q)); };
+// várias keys de uma vez: roda uma por uma e recarrega a lista só no fim
+async function bulkRun(keys, fn, okMsg) {
+  let ok = 0, fail = 0;
+  for (const k of keys) { try { const r = await fn(k); if (r && r.error) throw r.error; ok++; } catch { fail++; } }
+  UI.keySel.clear(); await loadAll(); render();
+  toast(fail ? `${okMsg(ok)} ${fail} deram erro.` : okMsg(ok), !!fail && !ok);
+}
 function pgKeys() {
   const q = UI.keyQ.toLowerCase();
   const FL = [['all', 'Todas'], ['active', 'Ativas'], ['unused', 'Não usadas'], ['soon', 'Vencem logo'], ['expired', 'Expiradas'], ['blocked', 'Bloqueadas']];
@@ -236,11 +267,13 @@ function pgKeys() {
     .filter(k => !q || [k.key, k.note, ownerName(k)].join(' ').toLowerCase().includes(q));
   const c = UI.create;
   return head('Keys', 'Crie, renove e bloqueie o acesso dos clientes. Clique numa key para ver as ações.', `<input class="in search" id="kq" placeholder="Buscar key, cliente ou nota" value="${esc(UI.keyQ)}">`) + `
-    <div class="chips">${FL.map(([f, t]) => `<button class="chip ${UI.keyFilter === f ? 'on' : ''}" data-kf="${f}">${t}</button>`).join('')}</div>
+    <div class="kbar"><div class="chips">${FL.map(([f, t]) => `<button class="chip ${UI.keyFilter === f ? 'on' : ''}" data-kf="${f}">${t}</button>`).join('')}</div>
+      ${usedExpired().length ? `<button class="btn sm red" id="kExp" title="Bloqueia de vez todas as keys que já foram ativadas e já venceram">Desativar usadas e expiradas (${usedExpired().length})</button>` : ''}</div>
+    ${UI.keySel.size ? `<div class="bulk"><b>${UI.keySel.size} ${UI.keySel.size === 1 ? 'key selecionada' : 'keys selecionadas'}</b><button class="btn sm" id="bCopy">Copiar</button><button class="btn sm red" id="bBlock">Bloquear</button><button class="btn sm red" id="bDel">Apagar</button><button class="btn sm" id="bNone">Limpar seleção</button></div>` : ''}
     <div class="row">
-      <div class="tbl-wrap" style="flex:999 1 520px;min-width:0"><table><thead><tr><th>Key</th><th>Cliente</th><th>Tipo</th><th>Vence</th><th>PCs</th><th>Status</th></tr></thead><tbody>
-        ${list.map(k => `<tr class="click" data-key="${k.id}"><td class="mono">${esc(k.key)}${k.tester ? ' <span class="pill p-cy">Tester</span>' : ''}</td>
-          <td>${esc(ownerName(k) || k.note || '—')}</td><td>${kindTxt(k)}</td><td>${expTxt(k)}</td><td>${pcsOf(k).length} / ${k.max_pcs}</td><td>${stPill(k)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Nenhuma key aqui.</td></tr>'}
+      <div class="tbl-wrap" style="flex:999 1 520px;min-width:0"><table><thead><tr><th class="ck"><input type="checkbox" id="kAll" title="Selecionar todas desta lista" ${list.length && list.every(k => UI.keySel.has(k.id)) ? 'checked' : ''}></th><th>Key</th><th>Cliente</th><th>Tipo</th><th>Vence</th><th>PCs</th><th>Status</th></tr></thead><tbody>
+        ${list.map(k => `<tr class="click ${UI.keySel.has(k.id) ? 'sel' : ''}" data-key="${k.id}"><td class="ck"><input type="checkbox" data-ks="${k.id}" ${UI.keySel.has(k.id) ? 'checked' : ''}></td><td class="mono">${esc(k.key)}${k.tester ? ' <span class="pill p-cy">Tester</span>' : ''}</td>
+          <td>${esc(ownerName(k) || k.note || '—')}</td><td>${kindTxt(k)}</td><td>${expTxt(k)}</td><td>${pcsOf(k).length} / ${k.max_pcs}</td><td>${stPill(k)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">Nenhuma key aqui.</td></tr>'}
       </tbody></table></div>
       <section class="card" style="flex:1 1 300px;max-width:360px;border-color:var(--cyan);display:flex;flex-direction:column;gap:14px">
         <h2 style="margin:0">Nova key</h2>
@@ -258,7 +291,28 @@ function pgKeys() {
 function bindKeys() {
   const kq = $('#kq'); kq.oninput = () => { UI.keyQ = kq.value; const pos = kq.selectionStart; render(); const n = $('#kq'); n.focus(); n.setSelectionRange(pos, pos); };
   $$('[data-kf]').forEach(b => b.onclick = () => { UI.keyFilter = b.dataset.kf; render(); });
-  $$('tr[data-key]').forEach(r => r.onclick = () => keyModal(r.dataset.key));
+  $$('tr[data-key]').forEach(r => r.onclick = e => { if (e.target.closest('.ck')) return; keyModal(r.dataset.key); });
+  $$('[data-ks]').forEach(c => c.onchange = () => { c.checked ? UI.keySel.add(c.dataset.ks) : UI.keySel.delete(c.dataset.ks); render(); });
+  $$('td.ck').forEach(td => td.onclick = e => { if (e.target.tagName !== 'INPUT') { const c = td.querySelector('input'); c.checked = !c.checked; c.onchange(); } });
+  const ka = $('#kAll'); if (ka) ka.onchange = () => { const l = keysListed(); if (ka.checked) l.forEach(k => UI.keySel.add(k.id)); else l.forEach(k => UI.keySel.delete(k.id)); render(); };
+  const sel = () => D.keys.filter(k => UI.keySel.has(k.id));
+  const bn = $('#bNone'); if (bn) bn.onclick = () => { UI.keySel.clear(); render(); };
+  const bc = $('#bCopy'); if (bc) bc.onclick = () => copy(sel().map(k => k.key).join('\n'), `${sel().length} key(s) copiada(s)`);
+  const bb = $('#bBlock'); if (bb) bb.onclick = async () => {
+    const l = sel().filter(k => k.status !== 'blocked'); if (!l.length) return toast('As keys selecionadas já estão bloqueadas.');
+    if (!confirm(`Bloquear ${l.length} key(s)? Os PCs delas perdem o acesso na próxima verificação.`)) return;
+    await bulkRun(l, async k => { const r = await sb.from('license_keys').update({ status: 'blocked' }).eq('id', k.id); if (!r.error) logEv(k.id, 'admin:block'); return r; }, n => `${n} key(s) bloqueada(s).`);
+  };
+  const bd = $('#bDel'); if (bd) bd.onclick = async () => {
+    const l = sel();
+    if (!confirm(D.trashOff ? `Apagar ${l.length} key(s) de vez? Os PCs delas perdem o acesso. Não dá para desfazer.` : `Apagar ${l.length} key(s)?\n\nOs PCs delas perdem o acesso. As keys vão para a Lixeira e dá para restaurar depois.`)) return;
+    await bulkRun(l, async k => { await logEv(null, 'admin:delete', k.key); return D.trashOff ? sb.from('license_keys').delete().eq('id', k.id) : sb.rpc('admin_trash_key', { p_id: k.id }); }, n => D.trashOff ? `${n} key(s) apagada(s).` : `${n} key(s) movida(s) para a Lixeira.`);
+  };
+  const ke = $('#kExp'); if (ke) ke.onclick = async () => {
+    const l = usedExpired();
+    if (!confirm(`Desativar ${l.length} key(s) que já foram usadas e já venceram?\n\nElas ficam bloqueadas: não dá para renovar sem desbloquear antes. As keys não usadas e as ativas não mudam.`)) return;
+    await bulkRun(l, async k => { const r = await sb.from('license_keys').update({ status: 'blocked' }).eq('id', k.id); if (!r.error) logEv(k.id, 'admin:block', 'expirada'); return r; }, n => `${n} key(s) expirada(s) desativada(s).`);
+  };
   const c = UI.create;
   const sync = () => { c.note = $('#cNote').value; if ($('#cDays')) c.days = Math.min(3650, Math.max(1, Math.round(+$('#cDays').value || 30))); c.pcs = +$('#cPcs').value || 1; c.qty = +$('#cQty').value || 1; };
   $$('[data-cd]').forEach(b => b.onclick = () => { sync(); const v = b.dataset.cd; if (v === 'life') c.kind = 'lifetime'; else { c.kind = 'days'; c.days = +v; } render(); });
