@@ -8,7 +8,7 @@ const ONLINE_MS = 15 * 60e3, DAY = 86400e3;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const D = { keys: [], machines: [], events: [], users: [], trash: [], trashOff: false, me: null, at: 0 };
+const D = { keys: [], machines: [], events: [], users: [], trash: [], trashOff: false, me: null, at: 0, settings: null, setOff: false };
 const UI = { keySel: new Set(), keyFilter: 'all', keyQ: '', userQ: '', userProv: 'all', pcQ: '', pcFilter: 'all', period: 90, newKeys: null, create: { kind: 'days', days: 30, pcs: 1, qty: 1, tester: false, note: '' } };
 
 // ---------- ícones ----------
@@ -77,6 +77,9 @@ async function loadAll() {
   // lixeira: se o patch 1.0.8 ainda não foi rodado no Supabase, o resto do painel continua funcionando
   const t = await sb.from('key_trash').select('*').order('deleted_at', { ascending: false });
   D.trashOff = !!t.error; D.trash = t.error ? [] : t.data;
+  // avisos no Discord: se o patch 1.1.1 ainda não foi rodado, o painel mostra como rodar
+  const st = await sb.from('admin_settings').select('*').eq('id', 1).maybeSingle();
+  D.setOff = !!st.error; D.settings = st.error ? null : st.data;
 }
 async function logEv(key_id, kind, detail) { try { await sb.from('events').insert({ key_id, kind, detail }); } catch {} }
 async function act(fn, okMsg) {
@@ -133,6 +136,7 @@ function openBell() {
   $('#modal').innerHTML = `<div class="bg"><div class="box" role="dialog" aria-modal="true" aria-label="Tentativas em outro PC">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>Tentativas em outro PC</h2><button class="btn sm" id="bClose">Fechar</button></div>
     <p class="note" style="margin:0">Quando alguém tenta ativar uma key que já está no limite de PCs, aparece aqui. O app da pessoa recusa a ativação.</p>
+    ${alertSettings()}
     ${list.length ? list.map(e => { const k = keyOf(e.key_id); const u = k && k.owner && userOf(k.owner); const isNew = new Date(e.created_at).getTime() > seen; const parts = (e.detail || '').split(' · ');
       return `<div class="alert ${isNew ? 'new' : ''}" ${k ? `data-key="${k.id}"` : ''}><div class="al-ic">${BELL}</div><div style="min-width:0;flex:1"><b class="mono">${esc(k ? k.key : 'key apagada')}</b>${isNew ? ' <span class="pill p-warn">nova</span>' : ''}
         <div class="al-d">${esc(parts[0] || 'PC desconhecido')}${parts[2] ? ' · ' + esc(parts[2]) : ''}${parts[1] ? ' · ' + esc(parts[1]) : ''}</div>
@@ -143,6 +147,32 @@ function openBell() {
   $('#bClose').onclick = close;
   $('#modal .bg').onclick = e => { if (e.target.classList.contains('bg')) close(); };
   $$('#modal .alert[data-key]').forEach(a => a.onclick = () => keyModal(a.dataset.key));
+  bindAlertSettings();
+}
+// como receber os avisos: notificação do navegador (painel aberto) e Discord (sempre, mesmo com o painel fechado)
+function alertSettings() {
+  const np = 'Notification' in window ? Notification.permission : 'unsupported';
+  const nTxt = np === 'granted' ? '<span class="pill p-ok">ligadas</span>' : np === 'denied' ? '<span class="pill p-bad">bloqueadas no navegador</span>' : np === 'unsupported' ? '<span class="pill">sem suporte</span>' : '<button class="btn sm cy" id="nOn">Ligar notificações</button>';
+  const wh = D.settings && D.settings.discord_webhook || '';
+  return `<div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px;margin:4px 0 6px">
+    <b>Como receber os avisos</b>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><span class="muted">Notificação do Windows (com o painel aberto em alguma aba)</span>${nTxt}</div>
+    ${D.setOff ? `<div class="note" style="margin:0">Para receber no <b>Discord</b> mesmo com o painel fechado, rode o arquivo <b>patch-1.1.1.sql</b> no Supabase (SQL Editor → New query → cole → Run) e recarregue esta página.</div>`
+      : `<div class="muted">Discord (chega mesmo com o painel fechado). Cole o link do webhook de um canal seu: no Discord, Editar canal → Integrações → Webhooks → Novo webhook → Copiar URL.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="whUrl" class="in" style="flex:1;min-width:240px" placeholder="https://discord.com/api/webhooks/..." value="${esc(wh)}">
+      <button class="btn sm cy" id="whSave">Salvar</button><button class="btn sm" id="whTest" ${wh ? '' : 'disabled'}>Testar</button></div>`}
+  </div>`;
+}
+function bindAlertSettings() {
+  const n = $('#nOn'); if (n) n.onclick = async () => { try { await Notification.requestPermission(); } catch {} openBell(); };
+  const sv = $('#whSave'); if (sv) sv.onclick = async () => {
+    const url = $('#whUrl').value.trim();
+    if (url && !/^https:\/\/(ptb\.|canary\.)?(discord|discordapp)\.com\/api\/webhooks\//.test(url)) return toast('Esse não parece um link de webhook do Discord.', true);
+    const r = await sb.from('admin_settings').upsert({ id: 1, discord_webhook: url || null, updated_at: new Date().toISOString() });
+    if (r.error) return toast('Erro: ' + r.error.message, true);
+    D.settings = { ...(D.settings || {}), discord_webhook: url || null }; toast(url ? 'Webhook salvo. Clique em Testar.' : 'Avisos no Discord desligados.'); openBell();
+  };
+  const ts = $('#whTest'); if (ts) ts.onclick = async () => { const r = await sb.rpc('admin_test_discord'); toast(r.error ? 'Erro: ' + r.error.message : 'Mensagem de teste enviada. Veja o canal no Discord.', !!r.error); };
 }
 function shell(active, inner) {
   const meName = D.me && D.me.user_metadata && (D.me.user_metadata.full_name || D.me.user_metadata.name) || (D.me && D.me.email) || 'admin';
@@ -569,6 +599,14 @@ async function boot() {
     if (error) throw error;
     if (!isAdm) return showNotAdmin(session.user);
     await loadAll(); checkNewLimits(); render();
+    // tempo real: o evento chega na hora (precisa do patch 1.1.1); a conferência de 30 s continua como reserva
+    try {
+      sb.channel('events-live').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events' }, p => {
+        const e = p.new; if (!e || D.events.some(x => x.id === e.id)) return;
+        D.events.unshift(e); checkNewLimits();
+        if (document.visibilityState === 'visible' && !$('#modal').innerHTML) { const a = document.activeElement; if (!a || a.tagName !== 'INPUT') render(); }
+      }).subscribe();
+    } catch {}
     // confere a cada 30 s: avisa na hora quando alguém tenta usar uma key em outro PC
     setInterval(async () => { try { await loadAll(); checkNewLimits(); if (document.visibilityState === 'visible' && !$('#modal').innerHTML) { const a = document.activeElement; if (!a || a.tagName !== 'INPUT') render(); } } catch {} }, 30000);
   } catch (e) {
